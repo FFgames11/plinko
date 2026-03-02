@@ -5,11 +5,26 @@ function updateBalance() {
 
 function setRows(val) {
     currentRows = parseInt(val);
+    // Update slider track fill: 8→0%, 12→50%, 16→100%
+    const pct = ((currentRows - 8) / (16 - 8)) * 100;
+    const slider = document.getElementById('rowsSlider');
+    if (slider) slider.style.background = `linear-gradient(90deg, var(--gold) ${pct}%, var(--gold) ${pct}%, rgba(255,255,255,0.15) ${pct}%)`;
+    buildBoard();
+}
+
+const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH'];
+
+function cycleRisk(dir) {
+    const idx = RISK_LEVELS.indexOf(currentRisk);
+    const next = (idx + dir + RISK_LEVELS.length) % RISK_LEVELS.length;
+    currentRisk = RISK_LEVELS[next];
+    $('riskLabel').textContent = currentRisk;
     buildBoard();
 }
 
 function setRisk(risk) {
     currentRisk = risk;
+    if ($('riskLabel')) $('riskLabel').textContent = risk;
     buildBoard();
 }
 
@@ -21,49 +36,57 @@ function buildBoard() {
   // 1. Clear and Setup Canvas
   container.innerHTML = '<canvas id="plinkoCanvas"></canvas>';
   const canvas = $('plinkoCanvas');
-  const w = container.clientWidth;
-  const h = container.clientHeight;
-  canvas.width = w;
+
+  // Use getBoundingClientRect for accurate post-layout dimensions
+  const rect = container.getBoundingClientRect();
+  const w = rect.width  || container.clientWidth;
+  const h = rect.height || container.clientHeight;
+  canvas.width  = w;
   canvas.height = h;
 
   const rows = currentRows;
-  
-  // 2. Calculate Responsive Spacing
-  // We leave a 10% margin at the top and 15% at the bottom for slots
-  const marginTop = h * 0.1;
-  const marginBottom = h * 0.15;
-  const availableHeight = h - marginTop - marginBottom;
-  
-  const spacingY = availableHeight / rows;
-  const spacingX = w / (rows + 2);
+
+  // 2. Dynamic spacing — always fills the board tightly for any row count
+  const slotStripHeight = 0;
+  const paddingTop = 20;
+  const paddingX = 20;
+
+  // Max pegs in last row = rows + 2
+  const maxPegs = rows + 2;
+  const spacingX = (w - paddingX * 2) / (maxPegs - 1);
+
+  const availableHeight = h - paddingTop - slotStripHeight - spacingX; // square cells
+  const spacingY = Math.min(spacingX, availableHeight / (rows - 1 + 1));
 
   // 3. Build Pegs
   for (let i = 0; i < rows; i++) {
-    const rowY = marginTop + (i * spacingY);
-    // Number of pegs increases per row: Row 0 has 3 pegs, Row 1 has 4, etc.
-    const pegsInRow = i + 3; 
+    const rowY = paddingTop + i * spacingY;
+    const pegsInRow = i + 3;
     const rowWidth = (pegsInRow - 1) * spacingX;
     const startX = (w - rowWidth) / 2;
 
     for (let j = 0; j < pegsInRow; j++) {
       const peg = document.createElement('div');
       peg.className = 'peg';
-      const x = startX + (j * spacingX);
-      
-      // We use transform for better performance and sub-pixel accuracy
-      peg.style.left = `0px`; 
-      peg.style.top = `0px`;
-      peg.style.transform = `translate(${x - 4}px, ${rowY - 4}px)`;
+      const x = startX + j * spacingX;
+      const tx = x - 3;
+      const ty = rowY - 3;
+      peg.style.left = '0px';
+      peg.style.top = '0px';
+      peg.style.setProperty('--tx', `${tx}px`);
+      peg.style.setProperty('--ty', `${ty}px`);
+      peg.style.transform = `translate(${tx}px, ${ty}px)`;
       container.appendChild(peg);
     }
   }
 
-  // 4. Build Slots (Perfectly aligned to the last row of pegs)
+  // 4. Build Slots — flush below the last peg row
+  const lastRowY = paddingTop + (rows - 1) * spacingY;
   const slotContainer = document.createElement('div');
   slotContainer.className = 'slot-container';
+  slotContainer.style.top = (lastRowY + spacingY * 0.6) + 'px';
+  slotContainer.style.bottom = 'auto';
   const currentMults = MULTIPLIERS[rows][currentRisk];
-  
-  // The slot width should match the spacing of the final pegs
   const slotWidth = w / currentMults.length;
 
   currentMults.forEach(m => {
@@ -87,15 +110,39 @@ function getSlotColor(m) {
 function startGame() {
     $('mainMenu').classList.add('hidden');
     $('gameRoot').classList.remove('hidden');
-    buildBoard();
+    // Defer so browser finishes layout before reading dimensions
+    requestAnimationFrame(() => requestAnimationFrame(() => buildBoard()));
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => buildBoard(), 150);
+    });
 }
 
-// Reuse your existing showWin and spawnParticles from original ui.js
-function showWin(amount) {
-    const m = $('winMessage');
-    $('winText').textContent = `WIN: $${amount.toFixed(2)}`;
-    m.classList.add('show');
-    setTimeout(() => m.classList.remove('show'), 1500);
+function showWin(amount, mult) {
+    const pillClass = 'side-pill ' + (mult >= 10 ? 'pill-big' : mult >= 2 ? 'pill-win' : mult >= 1 ? 'pill-mid' : 'pill-loss');
+    const pillText = mult + 'x';
+
+    // Side strip (desktop/tablet)
+    const side = $('winHistorySide');
+    if (side) {
+        const pill = document.createElement('div');
+        pill.className = pillClass;
+        pill.textContent = pillText;
+        side.insertBefore(pill, side.firstChild);
+        while (side.children.length > 10) side.removeChild(side.lastChild);
+    }
+
+    // Bottom strip (mobile)
+    const bottom = $('winHistoryBottom');
+    if (bottom) {
+        const pill = document.createElement('div');
+        pill.className = pillClass;
+        pill.textContent = pillText;
+        bottom.insertBefore(pill, bottom.firstChild);
+        while (bottom.children.length > 10) bottom.removeChild(bottom.lastChild);
+    }
 }
 
 function spawnParticles(big = false) {
@@ -137,4 +184,27 @@ async function runLoadingScreen() {
   if (loader) loader.classList.add('hidden');
   await delay(500);
   if (menu) menu.classList.remove('hidden');
+}
+function adjustBet(dir) {
+    const steps = [1, 2, 5, 10, 25, 50, 100];
+    const idx = steps.indexOf(bet);
+    let newIdx;
+    if (idx === -1) {
+        // Snap to nearest step
+        newIdx = dir > 0 ? 0 : steps.length - 1;
+    } else {
+        newIdx = Math.max(0, Math.min(steps.length - 1, idx + dir));
+    }
+    bet = steps[newIdx];
+    const label = $('betLabel');
+    if (label) label.textContent = '$' + bet.toFixed(2);
+}
+
+function setControlsDisabled(disabled) {
+    const els = document.querySelectorAll('.bet-arrow, .risk-arrow, #rowsSlider');
+    els.forEach(el => {
+        el.disabled = disabled;
+        el.style.opacity = disabled ? '0.4' : '1';
+        el.style.pointerEvents = disabled ? 'none' : '';
+    });
 }

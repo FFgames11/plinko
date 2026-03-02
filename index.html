@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fruit Frenzy Slots</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FF Plinko</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
 <!-- ── Loading Screen ──────────────────────────────────────── -->
 <div id="loadingScreen">
   <div class="load-stars" id="loadStars"></div> 
-  <div class="load-logo">Fanyou Plinko</div>
+  <div class="load-logo">FF Plinko</div>
   </div>
 </div>
 
@@ -23,7 +23,7 @@
   <div class="pillar right"></div>
   <div class="menu-ground"></div>
   <div class="menu-content">
-    <div class="menu-title">Fanyou Plinko</div>
+    <div class="menu-title">FF Plinko</div>
     <div class="menu-tagline">Drop your lucky ball!</div>
     <div class="menu-divider"></div>
     <div class="menu-info-row">
@@ -47,40 +47,55 @@
       </div>
     </div>
 
-    <div id="plinkoBoard" class="plinko-container">
-        <canvas id="plinkoCanvas"></canvas>
-    </div>
-
-    <div class="info-bar">
-      <div class="info-box">
-        <div class="info-label">Last Win</div>
-        <div id="winDisplay" class="info-value total-win">$0.00</div>
+    <div class="board-with-history">
+      <div id="plinkoBoard" class="plinko-container">
+          <canvas id="plinkoCanvas"></canvas>
       </div>
+      <div class="win-history-side" id="winHistorySide"></div>
     </div>
+    <div class="win-history-bottom" id="winHistoryBottom"></div>
 
     <div class="plinko-controls">
-        <div class="control-group">
-            <label>ROWS</label>
-            <select onchange="setRows(this.value)">
-                <option value="8">8 Rows</option>
-                <option value="12" selected>12 Rows</option>
-                <option value="16">16 Rows</option>
-            </select>
+        <div class="controls-top-row">
+            <div class="control-group rows-control">
+                <label>ROWS</label>
+                <div class="rows-slider-wrap">
+                    <span id="rowsLabel" class="rows-value">12</span>
+                    <input type="range" id="rowsSlider" min="8" max="16" step="4" value="12"
+                        oninput="$('rowsLabel').textContent = this.value; setRows(this.value)">
+                </div>
+            </div>
+            <div class="control-group risk-control">
+                <label>RISK LEVEL</label>
+                <div class="risk-picker">
+                    <button class="risk-arrow" onclick="cycleRisk(-1)">&#8249;</button>
+                    <span id="riskLabel">MEDIUM</span>
+                    <button class="risk-arrow" onclick="cycleRisk(1)">&#8250;</button>
+                </div>
+            </div>
         </div>
-        <div class="control-group">
-            <label>RISK</label>
-            <button class="risk-btn" onclick="setRisk('LOW')">LOW</button>
-            <button class="risk-btn active" onclick="setRisk('MEDIUM')">MED</button>
-            <button class="risk-btn" onclick="setRisk('HIGH')">HIGH</button>
-        </div>
-        <div class="bet-input">
-            <input type="number" id="betInput" value="1" onchange="bet = parseFloat(this.value)">
-            <button class="spin-btn" onclick="dropBall()">DROP 🍬</button>
+        <div class="control-group bet-control">
+            <label>BET AMOUNT</label>
+            <div class="bet-picker">
+                <button class="bet-arrow" onclick="adjustBet(-1)">&#8722;</button>
+                <span id="betLabel">$1.00</span>
+                <button class="bet-arrow" onclick="adjustBet(1)">&#43;</button>
+            </div>
+            <button class="spin-btn" onclick="dropBall()">DROP BALL</button>
         </div>
     </div>
   </div>
-  <div class="win-message" id="winMessage"><div class="win-text" id="winText"></div></div>
   <div class="particles" id="particles"></div>
+</div>
+
+<!-- ── Insufficient Balance Modal ──────────────────────────── -->
+<div id="noBalanceModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-icon">💸</div>
+    <div class="modal-title">Not Enough Balance!</div>
+    <div class="modal-msg">Your balance is too low to place this bet.<br>Lower your bet to continue.</div>
+    <button class="modal-close-btn" onclick="document.getElementById('noBalanceModal').classList.add('hidden')">OK</button>
+  </div>
 </div>
 
 <!-- ── Scripts (load order matters) ────────────────────────── -->
