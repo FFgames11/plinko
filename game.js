@@ -4,7 +4,10 @@ let balls = [];
 // game.js - Result-First Logic
 
 async function dropBall() {
-    if (balance < bet) return;
+    if (balance < bet) {
+        $('noBalanceModal').classList.remove('hidden');
+        return;
+    }
 
     balance -= bet;
     updateBalance();
@@ -15,22 +18,26 @@ async function dropBall() {
     // 1. Determine destination BEFORE dropping
     const targetSlot = getWeightedRandomSlot(currentRows);
     
-    // 2. Calculate visual target X
-    const slotWidth = boardWidth / (currentRows + 1);
+    // 2. Calculate visual target X — must match buildBoard() slot count exactly
+    const numSlots = MULTIPLIERS[currentRows][currentRisk].length;
+    const slotWidth = boardWidth / numSlots;
     const targetX = (targetSlot * slotWidth) + (slotWidth / 2);
+    // Clamp safely inside board so nudge never aims outside
+    const safeTargetX = Math.max(slotWidth * 0.5, Math.min(boardWidth - slotWidth * 0.5, targetX));
 
     const ball = {
-        x: boardWidth / 2 + (Math.random() * 20 - 10),
+        x: boardWidth / 2,           // Always start dead-center
         y: 10,
-        vx: (Math.random() - 0.5) * 2,
+        vx: (Math.random() - 0.5) * 1.0,  // Tiny initial randomness
         vy: 0,
-        radius: 5,
-        targetSlotIndex: targetSlot, // Store the intended outcome
-        destinyX: targetX,           // Store the intended X
+        radius: 9,
+        targetSlotIndex: targetSlot,
+        destinyX: safeTargetX,
         id: Date.now()
     };
 
     balls.push(ball);
+    setControlsDisabled(true);
     if (balls.length === 1) requestAnimationFrame(updatePhysics);
 }
 
@@ -39,29 +46,35 @@ function updatePhysics() {
     const ctx = $('plinkoCanvas').getContext('2d');
     ctx.clearRect(0, 0, board.clientWidth, board.clientHeight);
 
-    const gravity = 0.28;
-    const friction = 0.98;
+    const gravity = 0.10;   // Reduced from 0.28 → slow, floaty fall
+    const maxVy   = 4.5;    // Terminal velocity cap for smooth look
 
     for (let i = balls.length - 1; i >= 0; i--) {
         let b = balls[i];
         
-        // Apply Gravity
-        b.vy += gravity;
+        // Apply Gravity (capped)
+        b.vy = Math.min(b.vy + gravity, maxVy);
         
+        // Gentle horizontal damping for smoother motion
+        b.vx *= 0.97;
+
         // --- THE "DESTINY" NUDGE ---
-        // Gently guide ball toward its destinyX based on how far it has fallen
-        const fallProgress = b.y / board.clientHeight;
-        const nudgeForce = 0.05 * fallProgress; 
+        // Strength grows as ball falls, but stays gentle to avoid wild swings
+        const fallProgress = Math.min(b.y / board.clientHeight, 0.85);
+        const nudgeForce = 0.025 * fallProgress;
         b.vx += (b.destinyX - b.x) * nudgeForce;
+
+        // Hard-clamp vx so ball can NEVER shoot out of bounds
+        b.vx = Math.max(-5, Math.min(5, b.vx));
 
         b.x += b.vx;
         b.y += b.vy;
         
-        // Boundary Walls (Prevents balls flying off and hitting 1000x by mistake)
-        if (b.x < b.radius) { b.x = b.radius; b.vx *= -0.5; }
-        if (b.x > board.clientWidth - b.radius) { b.x = board.clientWidth - b.radius; b.vx *= -0.5; }
+        // Boundary Walls — hard push back, no clipping
+        if (b.x < b.radius) { b.x = b.radius + 1; b.vx = Math.abs(b.vx) * 0.6; }
+        if (b.x > board.clientWidth - b.radius) { b.x = board.clientWidth - b.radius - 1; b.vx = -Math.abs(b.vx) * 0.6; }
 
-        // Peg Collisions (Visual Only)
+        // Peg Collisions — light up peg on hit
         document.querySelectorAll('.peg').forEach(peg => {
             const rect = peg.getBoundingClientRect();
             const bRect = board.getBoundingClientRect();
@@ -74,24 +87,74 @@ function updatePhysics() {
 
             if (dist < b.radius + 3) {
                 const angle = Math.atan2(dy, dx);
-                b.vx = Math.cos(angle) * 3;
-                b.vy = Math.abs(Math.sin(angle) * 3);
+                // Slower bounce speed after collision
+                b.vx = Math.cos(angle) * 2.2;
+                b.vy = Math.abs(Math.sin(angle) * 2.2);
+
+                // Light up the peg
+                if (!peg.classList.contains('peg-hit')) {
+                    peg.classList.add('peg-hit');
+                    setTimeout(() => peg.classList.remove('peg-hit'), 300);
+                }
             }
         });
 
-        // Draw Ball
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-        ctx.fillStyle = COLORS.BALL || '#ff00ff';
-        ctx.fill();
-        ctx.closePath();
+        // Draw Ball — shrink + fade out when landing
+        const alpha = b.landing ? Math.max(0, 1 - b.landingProgress) : 1;
+        const drawRadius = b.radius * (b.landing ? (1 + b.landingProgress * 0.6) : 1);
+        if (alpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, drawRadius, 0, Math.PI * 2);
+            ctx.fillStyle = COLORS.BALL || '#ff00ff';
+            ctx.fill();
+            ctx.closePath();
+            ctx.restore();
+        }
 
-        // Landing Logic
-        if (b.y > board.clientHeight - 35) {
-            // IGNORE final X position, use the pre-calculated targetSlotIndex
-            const finalMult = MULTIPLIERS[currentRows][currentRisk][b.targetSlotIndex];
-            processResult(bet * finalMult, finalMult);
-            balls.splice(i, 1);
+        // Landing — detect when ball reaches the slot strip
+        if (!b.landing) {
+            const slots = document.querySelectorAll('.slot');
+            const targetSlotEl = slots[b.targetSlotIndex];
+            const boardRect = board.getBoundingClientRect();
+            const slotTriggerY = targetSlotEl
+                ? targetSlotEl.getBoundingClientRect().top - boardRect.top
+                : board.clientHeight - 35;
+
+            if (b.y > slotTriggerY) {
+                b.landing = true;
+                b.landingProgress = 0;
+
+                if (targetSlotEl) {
+                    targetSlotEl.classList.add('slot-hit');
+                    setTimeout(() => targetSlotEl.classList.remove('slot-hit'), 900);
+
+                    // Floating win text above the slot
+                    const rect = targetSlotEl.getBoundingClientRect();
+                    const floatEl = document.createElement('div');
+                    floatEl.className = 'float-win-text';
+                    const finalMult = MULTIPLIERS[currentRows][currentRisk][b.targetSlotIndex];
+                    const winAmt = bet * finalMult;
+                    floatEl.textContent = '+$' + winAmt.toFixed(2);
+                    floatEl.style.left = (rect.left - boardRect.left + rect.width / 2) + 'px';
+                    floatEl.style.top = (rect.top - boardRect.top - 10) + 'px';
+                    board.appendChild(floatEl);
+                    setTimeout(() => floatEl.remove(), 1000);
+                }
+
+                const finalMult = MULTIPLIERS[currentRows][currentRisk][b.targetSlotIndex];
+                processResult(bet * finalMult, finalMult);
+            }
+        }
+
+        // Advance fade-out, then remove ball
+        if (b.landing) {
+            b.landingProgress += 0.06;
+            if (b.landingProgress >= 1) {
+                balls.splice(i, 1);
+                if (balls.length === 0) setControlsDisabled(false);
+            }
         }
     }
 
@@ -113,10 +176,6 @@ function calculateLanding(finalX) {
 function processResult(win, mult) {
     balance += win;
     updateBalance();
-    
-    if (win > 0) {
-        $('winDisplay').textContent = '$' + win.toFixed(2);
-        showWin(win, false);
-        if (mult >= 5) spawnParticles(true);
-    }
+    showWin(win, mult);
+    if (mult >= 5) spawnParticles(true);
 }
